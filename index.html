@@ -104,6 +104,15 @@
     font-size: 13.5px; color: var(--ink-2); cursor: pointer; padding: 0 4px;
   }
   .filters .count { margin-left: auto; color: var(--muted); font-size: 13px; }
+  .filters .btn {
+    background: var(--page); color: var(--ink-2);
+    border: 1px solid var(--hairline); border-radius: 8px;
+    padding: 7px 10px; font: inherit; font-size: 13.5px; cursor: pointer;
+  }
+  .filters .btn:hover { border-color: var(--accent); color: var(--accent); }
+  .sheet .spark { display: block; margin-top: 4px; }
+  .sheet .spark polyline { fill: none; stroke: var(--accent); stroke-width: 2; }
+  .sheet .spark circle { fill: var(--accent); }
 
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; }
   .card {
@@ -187,6 +196,7 @@
     <input type="number" id="minMrr" placeholder="Min MRR $" min="0" step="100">
     <input type="number" id="maxPrice" placeholder="Max price $" min="0" step="5000">
     <label class="check"><input type="checkbox" id="verifiedOnly"> Verified only</label>
+    <label class="check"><input type="checkbox" id="cutOnly"> Price cut</label>
     <label class="check"><input type="checkbox" id="watchOnly"> ★ Watchlist</label>
     <select id="sort">
       <option value="listed_at">Newest</option>
@@ -195,6 +205,9 @@
       <option value="asking_price">Lowest price</option>
       <option value="growth">Fastest growing</option>
     </select>
+    <select id="screens"><option value="">Saved screens…</option></select>
+    <button type="button" class="btn" id="saveScreen" title="Save current filters as a named screen">Save screen</button>
+    <button type="button" class="btn" id="exportCsv" title="Download the filtered listings as CSV">Export CSV</button>
     <span class="count" id="count"></span>
   </section>
 
@@ -211,6 +224,7 @@ const fmtPct = (n) => n == null ? "—" : (n > 0 ? "+" : "") + n + "%";
 const median = (a) => { const s = [...a].sort((x,y)=>x-y); return s.length ? (s.length % 2 ? s[(s.length-1)/2] : (s[s.length/2-1]+s[s.length/2])/2) : null; };
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 
+let LAST_ROWS = [];
 let WATCH = new Set();
 try { WATCH = new Set(JSON.parse(localStorage.getItem("acquirescreen-watch") || "[]")); } catch {}
 const saveWatch = () => { try { localStorage.setItem("acquirescreen-watch", JSON.stringify([...WATCH])); } catch {} };
@@ -222,6 +236,17 @@ function ageMonths(l) {
   if (!l.founded_date) return null;
   return Math.round((Date.now() - new Date(l.founded_date)) / (30.44 * 864e5));
 }
+// Highest price ever asked before the current one — from the seller-reported
+// previous ask or from the pipeline's own price_history, whichever is higher.
+function priorPrice(l) {
+  const hist = (l.price_history ?? []).slice(0, -1).map((p) => p.price);
+  const prior = Math.max(l.previous_asking_price ?? 0, ...hist, 0);
+  return prior > 0 ? prior : null;
+}
+function hasPriceCut(l) {
+  const p = priorPrice(l);
+  return p != null && p > l.asking_price;
+}
 
 // Screening logic — the auditable core. status: good | warning | serious | critical | neutral
 function computeFlags(l) {
@@ -232,8 +257,8 @@ function computeFlags(l) {
     else if (m > 3.5) flags.push({ s: "serious", t: `Rich · ${m.toFixed(1)}× ARR` });
     else flags.push({ s: "neutral", t: `${m.toFixed(1)}× ARR` });
   }
-  if (l.previous_asking_price && l.previous_asking_price > l.asking_price) {
-    const cut = Math.round((1 - l.asking_price / l.previous_asking_price) * 100);
+  if (hasPriceCut(l)) {
+    const cut = Math.round((1 - l.asking_price / priorPrice(l)) * 100);
     flags.push({ s: "good", t: `Price cut −${cut}%` });
   }
   if (!l.revenue_verified) flags.push({ s: "critical", t: "Unverified revenue" });
@@ -256,7 +281,7 @@ function memoLines(l) {
   } else {
     val.push(`No MRR reported — price ${fmtMoney(l.asking_price)} cannot be screened on a multiple. Treat as unpriced until revenue is documented.`);
   }
-  if (l.previous_asking_price > l.asking_price) val.push(`Seller already cut from ${fmtMoney(l.previous_asking_price)} — <strong>motivated</strong>; anchor below ask.`);
+  if (hasPriceCut(l)) val.push(`Seller already cut from ${fmtMoney(priorPrice(l))} — <strong>motivated</strong>; anchor below ask.`);
   quality.push(l.revenue_verified ? `Revenue is <strong>payment-provider verified</strong>.` : `Revenue is <strong>self-reported</strong> — demand read-only Stripe/provider access before any offer.`);
   if (l.profit_margin_pct != null) quality.push(`${l.profit_margin_pct}% reported margin${l.profit_margin_pct < 50 ? " — check what labor/ad spend is excluded" : ""}.`);
   if (l.growth_30d_pct != null) quality.push(`30-day growth ${fmtPct(l.growth_30d_pct)}${l.growth_30d_pct < 0 ? " — is this churn or seasonality? Pull cohort data" : ""}.`);
@@ -275,6 +300,7 @@ function render(listings) {
   const minMrr = parseFloat(document.getElementById("minMrr").value);
   const maxP = parseFloat(document.getElementById("maxPrice").value);
   const verifiedOnly = document.getElementById("verifiedOnly").checked;
+  const cutOnly = document.getElementById("cutOnly").checked;
   const watchOnly = document.getElementById("watchOnly").checked;
   const sort = document.getElementById("sort").value;
 
@@ -285,6 +311,7 @@ function render(listings) {
     (isNaN(minMrr) || (l.mrr ?? 0) >= minMrr) &&
     (isNaN(maxP) || l.asking_price <= maxP) &&
     (!verifiedOnly || l.revenue_verified) &&
+    (!cutOnly || hasPriceCut(l)) &&
     (!watchOnly || WATCH.has(l.id))
   );
   const key = {
@@ -295,6 +322,7 @@ function render(listings) {
     growth: (l) => l.growth_30d_pct ?? -Infinity,
   }[sort];
   rows.sort((a, b) => key(a) < key(b) ? 1 : -1);
+  LAST_ROWS = rows;
 
   document.getElementById("count").textContent = `${rows.length} of ${listings.length}`;
   const grid = document.getElementById("grid");
@@ -325,8 +353,34 @@ function render(listings) {
   }
 }
 
+// Inline sparkline for price_history; returns "" with fewer than 2 points.
+function sparkline(hist) {
+  if (!hist || hist.length < 2) return "";
+  const prices = hist.map((p) => p.price);
+  const min = Math.min(...prices), max = Math.max(...prices);
+  const W = 220, H = 40, PAD = 4;
+  const x = (i) => PAD + (i / (hist.length - 1)) * (W - 2 * PAD);
+  const y = (p) => max === min ? H / 2 : PAD + (1 - (p - min) / (max - min)) * (H - 2 * PAD);
+  const pts = prices.map((p, i) => `${x(i).toFixed(1)},${y(p).toFixed(1)}`);
+  const last = pts[pts.length - 1].split(",");
+  return `<svg class="spark" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="Price history">
+    <polyline points="${pts.join(" ")}"></polyline>
+    <circle cx="${last[0]}" cy="${last[1]}" r="3"></circle></svg>`;
+}
+
+function priceHistoryLines(l) {
+  const hist = l.price_history ?? [];
+  if (hist.length < 2) return [];
+  return hist.map((p, i) => {
+    const prev = hist[i - 1];
+    const delta = prev ? Math.round((p.price / prev.price - 1) * 100) : null;
+    return `${esc(p.date)}: <strong>${fmtMoney(p.price)}</strong>${delta != null && delta !== 0 ? ` (${fmtPct(delta)})` : ""}`;
+  });
+}
+
 function openSheet(l) {
   const { val, quality, questions } = memoLines(l);
+  const histLines = priceHistoryLines(l);
   const sheet = document.getElementById("sheet");
   sheet.innerHTML = `
     <div class="head"><h2>${esc(l.name)}</h2><button class="close">Close</button></div>
@@ -338,6 +392,7 @@ function openSheet(l) {
       <div class="metric"><div class="l">Offers</div><div class="v">${l.offer_count ?? "—"}</div></div>
     </div>
     <div class="memo">
+      ${histLines.length ? `<h4>Price history</h4>${sparkline(l.price_history)}<ul>${histLines.map((x) => `<li>${x}</li>`).join("")}</ul>` : ""}
       <h4>Valuation</h4><ul>${val.map((x) => `<li>${x}</li>`).join("")}</ul>
       <h4>Revenue quality</h4><ul>${quality.map((x) => `<li>${x}</li>`).join("")}</ul>
       <h4>Ask the seller</h4><ul>${questions.map((x) => `<li>${x}</li>`).join("")}</ul>
@@ -354,7 +409,7 @@ function renderKpis(listings) {
   const mrrs = listings.map((l) => l.mrr).filter((m) => m != null);
   const weekAgo = new Date(Date.now() - 7 * 864e5).toISOString().slice(0, 10);
   const newThisWeek = listings.filter((l) => (l.first_seen_at ?? l.listed_at ?? "") >= weekAgo).length;
-  const cuts = listings.filter((l) => l.previous_asking_price > l.asking_price).length;
+  const cuts = listings.filter(hasPriceCut).length;
   const tiles = [
     { label: "Listings", value: listings.length, sub: `${WATCH.size} watched` },
     { label: "Median multiple", value: multiples.length ? median(multiples).toFixed(1) + "×" : "—", sub: "of ARR" },
@@ -364,6 +419,53 @@ function renderKpis(listings) {
   ];
   document.getElementById("kpis").innerHTML = tiles.map((t) =>
     `<div class="kpi"><div class="label">${t.label}</div><div class="value">${t.value}</div><div class="sub">${t.sub}</div></div>`).join("");
+}
+
+// Saved screens: named filter presets, kept in localStorage.
+const SCREEN_FIELDS = ["q", "category", "maxMultiple", "minMrr", "maxPrice", "verifiedOnly", "cutOnly", "watchOnly", "sort"];
+function loadScreens() {
+  try { return JSON.parse(localStorage.getItem("acquirescreen-screens") || "{}"); } catch { return {}; }
+}
+function renderScreenOptions() {
+  const sel = document.getElementById("screens");
+  sel.innerHTML = `<option value="">Saved screens…</option>`;
+  for (const name of Object.keys(loadScreens()).sort()) {
+    const o = document.createElement("option");
+    o.value = o.textContent = name;
+    sel.appendChild(o);
+  }
+}
+function currentScreen() {
+  const s = {};
+  for (const id of SCREEN_FIELDS) {
+    const el = document.getElementById(id);
+    s[id] = el.type === "checkbox" ? el.checked : el.value;
+  }
+  return s;
+}
+function applyScreen(s) {
+  for (const id of SCREEN_FIELDS) {
+    const el = document.getElementById(id);
+    if (el.type === "checkbox") el.checked = Boolean(s[id]);
+    else el.value = s[id] ?? "";
+  }
+}
+
+function exportCsv(rows) {
+  const cols = ["id", "source", "name", "category", "asking_price", "mrr", "arr_multiple",
+    "profit_margin_pct", "growth_30d_pct", "revenue_verified", "listed_at", "offer_count", "source_url"];
+  const cell = (v) => { const s = v == null ? "" : String(v); return /[",\n]/.test(s) ? `"${s.replaceAll('"', '""')}"` : s; };
+  const lines = [cols.join(",")];
+  for (const l of rows) {
+    const m = multipleOf(l);
+    lines.push(cols.map((c) => cell(c === "arr_multiple" ? (m == null ? "" : m.toFixed(2)) : l[c])).join(","));
+  }
+  const blob = new Blob([lines.join("\n") + "\n"], { type: "text/csv" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `acquirescreen-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(a.href);
 }
 
 async function main() {
@@ -380,9 +482,24 @@ async function main() {
   const cats = [...new Set(listings.map((l) => l.category).filter(Boolean))].sort();
   const sel = document.getElementById("category");
   for (const c of cats) { const o = document.createElement("option"); o.value = o.textContent = c; sel.appendChild(o); }
-  for (const id of ["q", "category", "maxMultiple", "minMrr", "maxPrice", "verifiedOnly", "watchOnly", "sort"]) {
+  for (const id of SCREEN_FIELDS) {
     document.getElementById(id).addEventListener("input", () => render(listings));
   }
+  renderScreenOptions();
+  document.getElementById("screens").addEventListener("change", (e) => {
+    const s = loadScreens()[e.target.value];
+    if (s) { applyScreen(s); render(listings); }
+  });
+  document.getElementById("saveScreen").addEventListener("click", () => {
+    const name = prompt("Name this screen:");
+    if (!name) return;
+    const screens = loadScreens();
+    screens[name.trim()] = currentScreen();
+    try { localStorage.setItem("acquirescreen-screens", JSON.stringify(screens)); } catch {}
+    renderScreenOptions();
+    document.getElementById("screens").value = name.trim();
+  });
+  document.getElementById("exportCsv").addEventListener("click", () => exportCsv(LAST_ROWS));
   renderKpis(listings);
   render(listings);
 }

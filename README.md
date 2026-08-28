@@ -75,6 +75,7 @@ product, price cut / motivated seller, unverified revenue).
 ## Roadmap
 
 - [ ] Flippa API key + first live source
+- [x] Saved screens (named filter presets, localStorage), price-history view, CSV export
 - [ ] Email/Slack alerts on saved-screen matches (the paid feature)
 - [ ] Category median multiples from accumulated history
 - [ ] Auth + Stripe (Lemon Squeezy) for subscriptions
