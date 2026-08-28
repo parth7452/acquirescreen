@@ -1,0 +1,392 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AcquireScreen</title>
+<style>
+  :root {
+    color-scheme: light;
+    --page: #f9f9f7;
+    --surface: #fcfcfb;
+    --ink: #0b0b0b;
+    --ink-2: #52514e;
+    --muted: #898781;
+    --hairline: #e1e0d9;
+    --border: rgba(11, 11, 11, 0.10);
+    --accent: #2a78d6;
+    --good: #0ca30c;
+    --good-text: #006300;
+    --warning: #fab219;
+    --serious: #ec835a;
+    --critical: #d03b3b;
+    --wash: rgba(11, 11, 11, 0.04);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) {
+      color-scheme: dark;
+      --page: #0d0d0d;
+      --surface: #1a1a19;
+      --ink: #ffffff;
+      --ink-2: #c3c2b7;
+      --muted: #898781;
+      --hairline: #2c2c2a;
+      --border: rgba(255, 255, 255, 0.10);
+      --accent: #3987e5;
+      --good-text: #0ca30c;
+      --wash: rgba(255, 255, 255, 0.06);
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --page: #0d0d0d;
+    --surface: #1a1a19;
+    --ink: #ffffff;
+    --ink-2: #c3c2b7;
+    --muted: #898781;
+    --hairline: #2c2c2a;
+    --border: rgba(255, 255, 255, 0.10);
+    --accent: #3987e5;
+    --good-text: #0ca30c;
+    --wash: rgba(255, 255, 255, 0.06);
+  }
+
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    background: var(--page);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-size: 15px;
+    line-height: 1.45;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 20px 16px 64px; }
+
+  header.top { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 6px; }
+  .logo { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; }
+  .logo span { color: var(--accent); }
+  .tagline { color: var(--ink-2); font-size: 14px; }
+  .updated { margin-left: auto; color: var(--muted); font-size: 12.5px; }
+
+  .demo-banner {
+    display: none; margin: 10px 0 2px; padding: 8px 12px;
+    border: 1px solid var(--border); border-left: 3px solid var(--warning);
+    border-radius: 8px; background: var(--surface); color: var(--ink-2); font-size: 13.5px;
+  }
+  .demo-banner.show { display: block; }
+
+  .kpis {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 10px; margin: 16px 0;
+  }
+  .kpi {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; padding: 12px 14px;
+  }
+  .kpi .label { font-size: 12px; color: var(--muted); margin-bottom: 2px; }
+  .kpi .value { font-size: 24px; font-weight: 650; letter-spacing: -0.01em; }
+  .kpi .sub { font-size: 12px; color: var(--ink-2); }
+
+  .filters {
+    display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+    padding: 10px; background: var(--surface);
+    border: 1px solid var(--border); border-radius: 12px; margin-bottom: 16px;
+  }
+  .filters input[type="search"], .filters select, .filters input[type="number"] {
+    background: var(--page); color: var(--ink);
+    border: 1px solid var(--hairline); border-radius: 8px;
+    padding: 7px 10px; font: inherit; font-size: 13.5px;
+  }
+  .filters input[type="search"] { flex: 1 1 160px; min-width: 140px; }
+  .filters input[type="number"] { width: 110px; }
+  .filters label.check {
+    display: inline-flex; gap: 6px; align-items: center;
+    font-size: 13.5px; color: var(--ink-2); cursor: pointer; padding: 0 4px;
+  }
+  .filters .count { margin-left: auto; color: var(--muted); font-size: 13px; }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; }
+  .card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 14px; padding: 16px; cursor: pointer;
+    display: flex; flex-direction: column; gap: 10px;
+    transition: border-color .15s;
+  }
+  .card:hover { border-color: var(--accent); }
+  .card .head { display: flex; align-items: flex-start; gap: 8px; }
+  .card h3 { font-size: 16.5px; letter-spacing: -0.01em; }
+  .card .cat { font-size: 12px; color: var(--muted); }
+  .star {
+    margin-left: auto; background: none; border: none; cursor: pointer;
+    font-size: 17px; color: var(--muted); padding: 0 2px; line-height: 1;
+  }
+  .star.on { color: var(--warning); }
+  .card .desc {
+    color: var(--ink-2); font-size: 13.5px;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  }
+  .metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; border-top: 1px solid var(--hairline); padding-top: 10px; }
+  .metric .l { font-size: 11px; color: var(--muted); }
+  .metric .v { font-size: 15.5px; font-weight: 650; font-variant-numeric: tabular-nums; }
+  .flags { display: flex; flex-wrap: wrap; gap: 6px; }
+  .flag {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-size: 11.5px; font-weight: 550; padding: 3px 8px;
+    border-radius: 999px; border: 1px solid var(--hairline); color: var(--ink-2);
+  }
+  .flag .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
+  .flag.good .dot { background: var(--good); }
+  .flag.warning .dot { background: var(--warning); }
+  .flag.serious .dot { background: var(--serious); }
+  .flag.critical .dot { background: var(--critical); }
+
+  .empty { color: var(--muted); padding: 40px 0; text-align: center; grid-column: 1 / -1; }
+
+  /* detail overlay */
+  .overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,.45);
+    display: none; align-items: flex-start; justify-content: center;
+    padding: 5vh 16px; overflow-y: auto; z-index: 10;
+  }
+  .overlay.show { display: flex; }
+  .sheet {
+    background: var(--surface); color: var(--ink);
+    border: 1px solid var(--border); border-radius: 16px;
+    max-width: 680px; width: 100%; padding: 24px;
+  }
+  .sheet .head { display: flex; align-items: baseline; gap: 10px; }
+  .sheet h2 { font-size: 20px; }
+  .sheet .close {
+    margin-left: auto; background: none; border: 1px solid var(--hairline);
+    border-radius: 8px; color: var(--ink-2); cursor: pointer; padding: 4px 10px; font: inherit;
+  }
+  .sheet .memo h4 { margin: 18px 0 6px; font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+  .sheet .memo ul { padding-left: 20px; display: grid; gap: 4px; font-size: 14px; color: var(--ink-2); }
+  .sheet .memo li strong { color: var(--ink); }
+  .sheet .metrics { grid-template-columns: repeat(4, 1fr); margin-top: 12px; }
+  footer { margin-top: 32px; color: var(--muted); font-size: 12.5px; text-align: center; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="logo">Acquire<span>Screen</span></div>
+    <div class="tagline">Deal-flow screener for micro-acquirers</div>
+    <div class="updated" id="updated"></div>
+  </header>
+  <div class="demo-banner" id="demoBanner">
+    ⚠ Showing <b>demo listings</b> (fictional data for product development). Connect a real source in <code>pipeline/adapters/</code>.
+  </div>
+
+  <section class="kpis" id="kpis"></section>
+
+  <section class="filters">
+    <input type="search" id="q" placeholder="Search name or description…">
+    <select id="category"><option value="">All categories</option></select>
+    <input type="number" id="maxMultiple" placeholder="Max ARR ×" min="0" step="0.5">
+    <input type="number" id="minMrr" placeholder="Min MRR $" min="0" step="100">
+    <input type="number" id="maxPrice" placeholder="Max price $" min="0" step="5000">
+    <label class="check"><input type="checkbox" id="verifiedOnly"> Verified only</label>
+    <label class="check"><input type="checkbox" id="watchOnly"> ★ Watchlist</label>
+    <select id="sort">
+      <option value="listed_at">Newest</option>
+      <option value="multiple">Lowest multiple</option>
+      <option value="mrr">Highest MRR</option>
+      <option value="asking_price">Lowest price</option>
+      <option value="growth">Fastest growing</option>
+    </select>
+    <span class="count" id="count"></span>
+  </section>
+
+  <section class="grid" id="grid"></section>
+
+  <div class="overlay" id="overlay"><div class="sheet" id="sheet"></div></div>
+
+  <footer>AcquireScreen · data refreshed by <code>pipeline/fetch.mjs</code> · listings link to their source marketplace</footer>
+</div>
+
+<script>
+const fmtMoney = (n) => n == null ? "—" : "$" + (n >= 1000 ? (n/1000).toFixed(n >= 100000 ? 0 : 1).replace(/\.0$/, "") + "k" : Math.round(n));
+const fmtPct = (n) => n == null ? "—" : (n > 0 ? "+" : "") + n + "%";
+const median = (a) => { const s = [...a].sort((x,y)=>x-y); return s.length ? (s.length % 2 ? s[(s.length-1)/2] : (s[s.length/2-1]+s[s.length/2])/2) : null; };
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+let WATCH = new Set();
+try { WATCH = new Set(JSON.parse(localStorage.getItem("acquirescreen-watch") || "[]")); } catch {}
+const saveWatch = () => { try { localStorage.setItem("acquirescreen-watch", JSON.stringify([...WATCH])); } catch {} };
+
+function multipleOf(l) {
+  return l.mrr > 0 && l.asking_price > 0 ? l.asking_price / (l.mrr * 12) : null;
+}
+function ageMonths(l) {
+  if (!l.founded_date) return null;
+  return Math.round((Date.now() - new Date(l.founded_date)) / (30.44 * 864e5));
+}
+
+// Screening logic — the auditable core. status: good | warning | serious | critical | neutral
+function computeFlags(l) {
+  const flags = [];
+  const m = multipleOf(l);
+  if (m != null) {
+    if (m < 1.5) flags.push({ s: "good", t: `Cheap · ${m.toFixed(1)}× ARR` });
+    else if (m > 3.5) flags.push({ s: "serious", t: `Rich · ${m.toFixed(1)}× ARR` });
+    else flags.push({ s: "neutral", t: `${m.toFixed(1)}× ARR` });
+  }
+  if (l.previous_asking_price && l.previous_asking_price > l.asking_price) {
+    const cut = Math.round((1 - l.asking_price / l.previous_asking_price) * 100);
+    flags.push({ s: "good", t: `Price cut −${cut}%` });
+  }
+  if (!l.revenue_verified) flags.push({ s: "critical", t: "Unverified revenue" });
+  if (l.profit_margin_pct != null && l.profit_margin_pct < 50) flags.push({ s: "warning", t: `Thin margin ${l.profit_margin_pct}%` });
+  if (l.growth_30d_pct != null && l.growth_30d_pct < 0) flags.push({ s: "serious", t: `Shrinking ${l.growth_30d_pct}%` });
+  if (l.growth_30d_pct != null && l.growth_30d_pct >= 15) flags.push({ s: "good", t: `Fast growth +${l.growth_30d_pct}%` });
+  const age = ageMonths(l);
+  if (age != null && age < 12) flags.push({ s: "warning", t: `Young · ${age}mo old` });
+  if (l.offer_count >= 5) flags.push({ s: "neutral", t: `${l.offer_count} offers in` });
+  return flags;
+}
+
+function memoLines(l) {
+  const m = multipleOf(l);
+  const age = ageMonths(l);
+  const val = [], quality = [], questions = [];
+  if (m != null) {
+    val.push(`<strong>${m.toFixed(2)}× ARR</strong> (${fmtMoney(l.asking_price)} on ${fmtMoney(l.mrr)} MRR). Sub-$500k SaaS typically clears at 2.5–3.5× ARR; ${m < 2.5 ? "this screens <strong>below</strong> that band" : m <= 3.5 ? "this is <strong>in line</strong>" : "this screens <strong>above</strong> the band — negotiate or pass"}.`);
+    val.push(`Gross payback ≈ <strong>${(l.asking_price / (l.mrr * (l.profit_margin_pct ?? 100) / 100 * 12)).toFixed(1)} years</strong> at current margin, before your own costs.`);
+  } else {
+    val.push(`No MRR reported — price ${fmtMoney(l.asking_price)} cannot be screened on a multiple. Treat as unpriced until revenue is documented.`);
+  }
+  if (l.previous_asking_price > l.asking_price) val.push(`Seller already cut from ${fmtMoney(l.previous_asking_price)} — <strong>motivated</strong>; anchor below ask.`);
+  quality.push(l.revenue_verified ? `Revenue is <strong>payment-provider verified</strong>.` : `Revenue is <strong>self-reported</strong> — demand read-only Stripe/provider access before any offer.`);
+  if (l.profit_margin_pct != null) quality.push(`${l.profit_margin_pct}% reported margin${l.profit_margin_pct < 50 ? " — check what labor/ad spend is excluded" : ""}.`);
+  if (l.growth_30d_pct != null) quality.push(`30-day growth ${fmtPct(l.growth_30d_pct)}${l.growth_30d_pct < 0 ? " — is this churn or seasonality? Pull cohort data" : ""}.`);
+  if (age != null) quality.push(`${age} months old${age < 12 ? " — limited operating history; revenue may not be durable" : ""}.`);
+  questions.push("Churn by monthly cohort for the last 12 months; top-10 customer concentration.");
+  questions.push("Where does traffic/revenue actually come from, and does it survive the founder leaving?");
+  questions.push("What is excluded from the reported margin (founder time, ads, contractors)?");
+  if (!l.revenue_verified) questions.push("Read-only payment-provider access, before any LOI.");
+  return { val, quality, questions };
+}
+
+function render(listings) {
+  const q = document.getElementById("q").value.toLowerCase();
+  const cat = document.getElementById("category").value;
+  const maxM = parseFloat(document.getElementById("maxMultiple").value);
+  const minMrr = parseFloat(document.getElementById("minMrr").value);
+  const maxP = parseFloat(document.getElementById("maxPrice").value);
+  const verifiedOnly = document.getElementById("verifiedOnly").checked;
+  const watchOnly = document.getElementById("watchOnly").checked;
+  const sort = document.getElementById("sort").value;
+
+  let rows = listings.filter((l) =>
+    (!q || (l.name + " " + (l.description||"")).toLowerCase().includes(q)) &&
+    (!cat || l.category === cat) &&
+    (isNaN(maxM) || (multipleOf(l) != null && multipleOf(l) <= maxM)) &&
+    (isNaN(minMrr) || (l.mrr ?? 0) >= minMrr) &&
+    (isNaN(maxP) || l.asking_price <= maxP) &&
+    (!verifiedOnly || l.revenue_verified) &&
+    (!watchOnly || WATCH.has(l.id))
+  );
+  const key = {
+    listed_at: (l) => l.listed_at ?? "",
+    multiple: (l) => -(multipleOf(l) ?? Infinity),
+    mrr: (l) => l.mrr ?? -1,
+    asking_price: (l) => -l.asking_price,
+    growth: (l) => l.growth_30d_pct ?? -Infinity,
+  }[sort];
+  rows.sort((a, b) => key(a) < key(b) ? 1 : -1);
+
+  document.getElementById("count").textContent = `${rows.length} of ${listings.length}`;
+  const grid = document.getElementById("grid");
+  grid.innerHTML = rows.length ? "" : `<div class="empty">No listings match these screens.</div>`;
+  for (const l of rows) {
+    const card = document.createElement("div");
+    card.className = "card";
+    const flags = computeFlags(l);
+    card.innerHTML = `
+      <div class="head">
+        <div><h3>${esc(l.name)}</h3><div class="cat">${esc(l.category ?? "")} · via ${esc(l.source)}</div></div>
+        <button class="star ${WATCH.has(l.id) ? "on" : ""}" title="Watchlist" aria-label="Toggle watchlist">★</button>
+      </div>
+      <div class="desc">${esc(l.description ?? "")}</div>
+      <div class="flags">${flags.map((f) => `<span class="flag ${f.s}"><span class="dot"></span>${f.t}</span>`).join("")}</div>
+      <div class="metrics">
+        <div class="metric"><div class="l">Asking</div><div class="v">${fmtMoney(l.asking_price)}</div></div>
+        <div class="metric"><div class="l">MRR</div><div class="v">${fmtMoney(l.mrr)}</div></div>
+        <div class="metric"><div class="l">30d growth</div><div class="v">${fmtPct(l.growth_30d_pct)}</div></div>
+      </div>`;
+    card.querySelector(".star").addEventListener("click", (e) => {
+      e.stopPropagation();
+      WATCH.has(l.id) ? WATCH.delete(l.id) : WATCH.add(l.id);
+      saveWatch(); render(listings); renderKpis(listings);
+    });
+    card.addEventListener("click", () => openSheet(l));
+    grid.appendChild(card);
+  }
+}
+
+function openSheet(l) {
+  const { val, quality, questions } = memoLines(l);
+  const sheet = document.getElementById("sheet");
+  sheet.innerHTML = `
+    <div class="head"><h2>${esc(l.name)}</h2><button class="close">Close</button></div>
+    <div class="cat">${esc(l.category ?? "")} · listed ${esc(l.listed_at ?? "—")} · <a href="${esc(l.source_url)}" target="_blank" rel="noopener">view on ${esc(l.source)} ↗</a></div>
+    <div class="metrics">
+      <div class="metric"><div class="l">Asking</div><div class="v">${fmtMoney(l.asking_price)}</div></div>
+      <div class="metric"><div class="l">MRR</div><div class="v">${fmtMoney(l.mrr)}</div></div>
+      <div class="metric"><div class="l">Margin</div><div class="v">${l.profit_margin_pct != null ? l.profit_margin_pct + "%" : "—"}</div></div>
+      <div class="metric"><div class="l">Offers</div><div class="v">${l.offer_count ?? "—"}</div></div>
+    </div>
+    <div class="memo">
+      <h4>Valuation</h4><ul>${val.map((x) => `<li>${x}</li>`).join("")}</ul>
+      <h4>Revenue quality</h4><ul>${quality.map((x) => `<li>${x}</li>`).join("")}</ul>
+      <h4>Ask the seller</h4><ul>${questions.map((x) => `<li>${x}</li>`).join("")}</ul>
+    </div>`;
+  sheet.querySelector(".close").addEventListener("click", closeSheet);
+  document.getElementById("overlay").classList.add("show");
+}
+function closeSheet() { document.getElementById("overlay").classList.remove("show"); }
+document.getElementById("overlay").addEventListener("click", (e) => { if (e.target.id === "overlay") closeSheet(); });
+addEventListener("keydown", (e) => { if (e.key === "Escape") closeSheet(); });
+
+function renderKpis(listings) {
+  const multiples = listings.map(multipleOf).filter((m) => m != null);
+  const mrrs = listings.map((l) => l.mrr).filter((m) => m != null);
+  const weekAgo = new Date(Date.now() - 7 * 864e5).toISOString().slice(0, 10);
+  const newThisWeek = listings.filter((l) => (l.first_seen_at ?? l.listed_at ?? "") >= weekAgo).length;
+  const cuts = listings.filter((l) => l.previous_asking_price > l.asking_price).length;
+  const tiles = [
+    { label: "Listings", value: listings.length, sub: `${WATCH.size} watched` },
+    { label: "Median multiple", value: multiples.length ? median(multiples).toFixed(1) + "×" : "—", sub: "of ARR" },
+    { label: "Median MRR", value: fmtMoney(median(mrrs)), sub: "per listing" },
+    { label: "New this week", value: newThisWeek, sub: "first seen ≤7d" },
+    { label: "Price cuts", value: cuts, sub: "motivated sellers" },
+  ];
+  document.getElementById("kpis").innerHTML = tiles.map((t) =>
+    `<div class="kpi"><div class="label">${t.label}</div><div class="value">${t.value}</div><div class="sub">${t.sub}</div></div>`).join("");
+}
+
+async function main() {
+  let data;
+  try {
+    data = await (await fetch("data/listings.json")).json();
+  } catch {
+    document.getElementById("grid").innerHTML = `<div class="empty">Couldn't load data/listings.json — run <code>node pipeline/fetch.mjs</code>.</div>`;
+    return;
+  }
+  const listings = data.listings ?? [];
+  document.getElementById("updated").textContent = data.generated_at ? "Updated " + new Date(data.generated_at).toLocaleString() : "";
+  if (listings.some((l) => l.source === "demo")) document.getElementById("demoBanner").classList.add("show");
+  const cats = [...new Set(listings.map((l) => l.category).filter(Boolean))].sort();
+  const sel = document.getElementById("category");
+  for (const c of cats) { const o = document.createElement("option"); o.value = o.textContent = c; sel.appendChild(o); }
+  for (const id of ["q", "category", "maxMultiple", "minMrr", "maxPrice", "verifiedOnly", "watchOnly", "sort"]) {
+    document.getElementById(id).addEventListener("input", () => render(listings));
+  }
+  renderKpis(listings);
+  render(listings);
+}
+main();
+</script>
+</body>
+</html>
